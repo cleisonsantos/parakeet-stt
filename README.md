@@ -8,6 +8,34 @@ A [Hermes Agent](https://hermes-agent.nousresearch.com/) plugin that adds
 multilingual ASR model that runs efficiently on **CPU** with automatic language
 detection for 25 European languages, including **Portuguese**.
 
+---
+
+## 🚀 Install with one command
+
+Copy and paste this into your terminal:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/cleisonsantos/parakeet-stt/main/install.sh | bash
+```
+
+The script will:
+
+1. ✅ Detect if Hermes is installed (aborts with instructions if not)
+2. ✅ Find your Hermes installation directory and Python venv
+3. ✅ Clone the plugin to the right `plugins/` folder
+4. ✅ Enable the plugin via `hermes plugins enable`
+5. ✅ Install Python dependencies (transformers, torch, etc.)
+6. ✅ Verify everything is in place
+7. ✅ Show you the final config step
+
+### Install for a specific profile
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/cleisonsantos/parakeet-stt/main/install.sh | bash -s -- --profile sureka-cloud
+```
+
+---
+
 ## Why Parakeet V3?
 
 | Aspect | faster-whisper large-v3 (default) | Parakeet V3 |
@@ -23,38 +51,38 @@ detection for 25 European languages, including **Portuguese**.
 > ✅ **Best for**: CPU-only machines, Portuguese speakers, low-RAM environments
 > ⚠️ **Limited to 25 European languages** — not suitable for Asian/African languages
 
-## Quick Install
+---
 
-### Prerequisites
+## Manual Setup
 
-- [Hermes Agent](https://hermes-agent.nousresearch.com/) installed
-- Python dependencies (install in the Hermes venv):
+If you prefer to install step by step:
 
-```bash
-cd /path/to/hermes-agent
-uv pip install transformers torch soundfile librosa accelerate
-```
-
-### Install the plugin
+### 1. Clone the plugin
 
 ```bash
-# Clone this repo into your Hermes plugins directory
-mkdir -p ~/.hermes/plugins
 git clone https://github.com/cleisonsantos/parakeet-stt.git ~/.hermes/plugins/parakeet-stt
 
-# Or using the install script:
-curl -fsSL https://raw.githubusercontent.com/cleisonsantos/parakeet-stt/main/install.sh | bash
+# For a named profile:
+# git clone https://github.com/cleisonsantos/parakeet-stt.git ~/.hermes/profiles/<name>/plugins/parakeet-stt
 ```
 
-### Enable the plugin
+### 2. Install dependencies
+
+```bash
+# Find your Hermes venv (usually ~/.hermes/hermes-agent/.venv or venv)
+uv pip install --python /path/to/hermes/venv/bin/python3 \
+  transformers torch soundfile librosa accelerate
+```
+
+### 3. Enable the plugin
 
 ```bash
 hermes plugins enable parakeet-stt
 ```
 
-### Switch to Parakeet V3
+### 4. Configure
 
-Edit `~/.hermes/config.yaml` (or your profile's config.yaml):
+Edit your profile's `config.yaml`:
 
 ```yaml
 stt:
@@ -64,50 +92,22 @@ stt:
     language: ""              # auto-detect; "pt" for Portuguese
 ```
 
-Then restart the gateway:
+### 5. Restart the gateway
 
 ```bash
 hermes gateway restart
 ```
 
-## Manual Setup
-
-If you prefer to install manually:
-
-1. **Copy the plugin files** to your Hermes profile:
-
-```bash
-# For the default profile:
-cp -r parakeet-stt ~/.hermes/plugins/parakeet-stt
-
-# For a named profile:
-cp -r parakeet-stt ~/.hermes/profiles/<profile>/plugins/parakeet-stt
-```
-
-2. **Enable** the plugin:
-```bash
-hermes plugins enable parakeet-stt
-```
-
-3. **Install dependencies** in the Hermes venv:
-```bash
-cd /path/to/hermes-agent
-uv pip install transformers torch soundfile librosa accelerate
-```
-
-4. **Configure** `stt.provider: parakeet` in your config.yaml
-
-5. **Restart** the gateway:
-```bash
-hermes gateway restart
-```
+---
 
 ## Configuration
 
 | Setting | Description | Default |
 |---------|-------------|---------|
 | `stt.provider` | Set to `parakeet` to activate | `local` |
-| `stt.parakeet.language` | BCP-47 language hint (`"pt"`, `"en"`, or empty for auto-detect) | `""` |
+| `stt.parakeet.language` | BCP-47 hint (`"pt"`, `"en"`, or `""` for auto) | `""` |
+
+---
 
 ## Testing
 
@@ -141,6 +141,8 @@ print(r.get('transcript', ''))
 "
 ```
 
+---
+
 ## Switching Back to faster-whisper
 
 ```yaml
@@ -150,17 +152,7 @@ stt:
 
 Then restart the gateway.
 
-## Project Structure
-
-```
-parakeet-stt/
-├── plugin.yaml       # Hermes plugin manifest
-├── __init__.py       # TranscriptionProvider implementation
-├── install.sh        # One-command install script
-├── README.md         # This file
-├── LICENSE           # MIT license
-└── .gitignore
-```
+---
 
 ## How It Works
 
@@ -174,6 +166,20 @@ The model (`nvidia/parakeet-tdt-0.6b-v3`) is:
 - **Device-aware** — auto-selects CUDA → MPS → CPU
 - **Auto-chunking** — splits audio >30s into segments
 - **Weight ~600MB** — downloaded once and cached in `~/.cache/huggingface/hub/`
+
+### Project Structure
+
+```
+parakeet-stt/
+├── plugin.yaml       # Hermes plugin manifest
+├── __init__.py       # TranscriptionProvider implementation
+├── install.sh        # One-command installer (auto-detects Hermes)
+├── README.md         # This file
+├── LICENSE           # MIT license
+└── .gitignore
+```
+
+---
 
 ## License
 
