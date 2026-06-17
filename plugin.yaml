@@ -1,0 +1,9 @@
+name: parakeet-stt
+version: 1.0.0
+description: >
+  NVIDIA Parakeet-TDT-0.6B-v3 STT provider — CPU-optimized multilingual
+  speech-to-text with automatic language detection, including Portuguese.
+  Requires transformers (>=4.50), torch, librosa, soundfile, and accelerate.
+author: Cleison Santos <cleisonsantos@users.noreply.github.com>
+kind: backend
+requires_env: []
