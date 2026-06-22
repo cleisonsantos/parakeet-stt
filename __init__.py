@@ -1,36 +1,26 @@
 """
-Parakeet-TDT-0.6B-v3 Speech-to-Text Provider for Hermes Agent
-===============================================================
+Parakeet-TDT-0.6B-v3 Speech-to-Text Provider
+===============================================
 
-A :class:`~agent.transcription_provider.TranscriptionProvider` that wraps
-NVIDIA's Parakeet-TDT-0.6B-v3 — a 600M-parameter multilingual ASR model
-based on FastConformer-TDT architecture. CPU-optimized, supports 25 European
-languages (including Portuguese) with **automatic language detection**.
-
-Usage
------
-Once installed and enabled, switch to this provider in config.yaml::
-
-    stt:
-      provider: parakeet
-      parakeet:
-        language: ""       # auto-detect; "pt" for Portuguese
-
-Then restart the gateway::
-
-    hermes gateway restart
+Register a :class:`TranscriptionProvider` for NVIDIA's Parakeet-TDT-0.6B-v3
+model — a 600M-parameter multilingual ASR model based on FastConformer-TDT
+architecture, CPU-optimized, supporting 25 European languages including
+Portuguese (automatic language detection).
 
 Dependencies
 ------------
-- ``transformers`` (>=4.50)
+- ``transformers`` (>=4.50, already supports FastConformer-TDT)
 - ``torch``
-- ``soundfile``, ``librosa``
+- ``soundfile`` + ``librosa`` for audio loading
 - ``accelerate`` (optional)
-- ``ffmpeg`` on PATH (for ogg/mp3 transcoding)
 
-Install them in the Hermes venv::
+Install::
 
-    uv pip install transformers torch soundfile librosa accelerate
+    pip install transformers torch soundfile librosa accelerate
+    # Also need ffmpeg on PATH for non-WAV formats (ogg, mp3, etc.)
+
+For bleeding-edge TDT features (optional):
+    pip install git+https://github.com/huggingface/transformers
 """
 
 from __future__ import annotations
@@ -69,7 +59,7 @@ def _get_parakeet_pipeline():
 
     Loads the model on first call and caches it for the lifetime of the
     Hermes agent process. This is critical for performance — model loading
-    takes ~2–30s, but inference takes ~0.5–2s per short clip.
+    takes ~10–30s, but inference takes ~1–2s per short clip.
     """
     global _parakeet_pipeline, _parakeet_device
 
@@ -82,17 +72,17 @@ def _get_parakeet_pipeline():
     except ImportError as exc:
         raise ImportError(
             "Parakeet STT requires 'transformers' and 'torch'. "
-            "Install with: "
-            "uv pip install transformers torch soundfile librosa accelerate"
+            "Install with: pip install transformers torch soundfile librosa accelerate"
         ) from exc
 
     # Check ffmpeg
     if not _check_ffmpeg():
         logger.warning(
             "ffmpeg not found on PATH. Parakeet V3 may fail to transcode "
-            "non-WAV formats (ogg, mp3). Install ffmpeg for full support."
+            "non-WAV formats (ogg, mp3). Install ffmpeg for full format support."
         )
 
+    # Suppress the HF token warning
     os.environ.setdefault("HF_HUB_DISABLE_SYMBOLS_WARNING", "1")
 
     # Pick the best available device
@@ -107,11 +97,12 @@ def _get_parakeet_pipeline():
     model_id = "nvidia/parakeet-tdt-0.6b-v3"
 
     logger.info(
-        "Loading Parakeet-TDT-0.6B-v3 on %s (this may take 10–30s)...",
+        "Loading Parakeet-TDT-0.6B-v3 on %s (this may take 10–30s on first load)...",
         device,
     )
 
     try:
+        # Suppress the max_length warning from generation
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", UserWarning)
             _parakeet_pipeline = hf_pipeline(
@@ -124,8 +115,8 @@ def _get_parakeet_pipeline():
         _parakeet_pipeline = None
         raise RuntimeError(
             f"Failed to load Parakeet-TDT-0.6B-v3: {exc}\n\n"
-            "If you see 'unknown architecture' or 'not supported', you may "
-            "need a newer transformers version:\n"
+            "If you see 'unknown architecture' or 'not supported', you may need "
+            "to install transformers from source:\n"
             "  pip install git+https://github.com/huggingface/transformers"
         ) from exc
 
@@ -138,9 +129,11 @@ def _unload_parakeet_pipeline():
     _parakeet_pipeline = None
     _parakeet_device = None
     import gc
+
     gc.collect()
     try:
         import torch
+
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
     except ImportError:
@@ -153,7 +146,7 @@ def _unload_parakeet_pipeline():
 
 
 class ParakeetTranscriptionProvider:
-    """Transcription provider using NVIDIA Parakeet-TDT-0.6B-v3.
+    """Transcription provider using NVIDIA Parakeet-TDT-0.6B-v3 via HF Transformers.
 
     The model is loaded once (lazily on first ``transcribe()`` call) and
     cached as a module-level singleton so subsequent calls reuse it.
@@ -168,11 +161,21 @@ class ParakeetTranscriptionProvider:
         return "Parakeet V3 (NVIDIA)"
 
     def is_available(self) -> bool:
+        """Return True when the Parakeet model can be loaded.
+
+        Checks that ``transformers`` and ``torch`` are importable.
+        Does NOT actually load the model here — that happens lazily in
+        ``transcribe()``.
+
+        Note: torch may raise ValueError at import time when it detects
+        CUDA libraries that aren't loadable (e.g. libcublas not found).
+        We catch all exceptions to report availability correctly.
+        """
         try:
             import transformers  # noqa: F401
             import torch        # noqa: F401
             return True
-        except ImportError:
+        except Exception:  # ImportError, ValueError, OSError, etc.
             return False
 
     def list_models(self) -> List[Dict[str, Any]]:
@@ -185,7 +188,7 @@ class ParakeetTranscriptionProvider:
                     "de", "el", "hu", "it", "lv", "lt", "mt", "pl", "pt",
                     "ro", "sk", "sl", "es", "sv", "ru", "uk",
                 ],
-                "max_audio_seconds": 1440,
+                "max_audio_seconds": 1440,  # 24 min with full attention
             }
         ]
 
@@ -211,10 +214,10 @@ class ParakeetTranscriptionProvider:
         """Transcribe audio using Parakeet-TDT-0.6B-v3.
 
         Args:
-            file_path: Absolute path to audio file.
-            model: Ignored — single pre-trained model.
+            file_path: Absolute path to audio file (wav, flac, mp3, ogg, etc.).
+            model: Ignored — Parakeet uses its single pre-trained model.
             language: Optional BCP-47 hint (e.g. ``"pt"``, ``"en"``).
-                Auto-detects language when not provided.
+                The model auto-detects language when not provided.
 
         Returns:
             Standard transcription envelope dict.
@@ -245,15 +248,20 @@ class ParakeetTranscriptionProvider:
         )
 
         try:
+            # Use chunking for longer audio (>30s)
             file_size = audio_path.stat().st_size
             use_chunking = file_size > 500_000  # ~30s of 16kHz mono
 
-            pipe_kwargs = {"return_timestamps": False}
+            # Suppress the max_length warning
+            import warnings as _warn
+            pipe_kwargs = {
+                "return_timestamps": False,
+            }
             if use_chunking:
                 pipe_kwargs["chunk_length_s"] = 30
 
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore", UserWarning)
+            with _warn.catch_warnings():
+                _warn.simplefilter("ignore", UserWarning)
                 result = pipe(str(audio_path.resolve()), **pipe_kwargs)
 
             transcript = ""
@@ -262,6 +270,7 @@ class ParakeetTranscriptionProvider:
             elif isinstance(result, str):
                 transcript = result
             elif isinstance(result, list):
+                # Chunked result returns list of chunks
                 texts = []
                 for chunk in result:
                     if isinstance(chunk, dict):
@@ -317,8 +326,8 @@ def register(ctx) -> None:
     """
     from agent.transcription_provider import TranscriptionProvider
 
-    # Dynamically inherit from the ABC so the plugin system
-    # recognises this as a valid TranscriptionProvider.
+    # Create a subclass that inherits from both our implementation and
+    # the ABC, so the plugin system recognizes it as a valid provider.
     provider_cls = type(
         "RegisteredParakeetProvider",
         (ParakeetTranscriptionProvider, TranscriptionProvider),
